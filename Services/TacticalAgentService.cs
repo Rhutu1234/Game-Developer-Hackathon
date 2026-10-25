@@ -63,33 +63,36 @@ namespace Game_Developer_Hackathon.Services
                 var apiKey = azureSection["ApiKey"];
                 var deployment = azureSection["DeploymentName"] ?? azureSection["Deployment"] ?? "gpt-4o";
 
-                // 1. Initialize the client targeting your local Ollama endpoint
-                var client = new OpenAIClient(
-                    new ApiKeyCredential("ollama"),
-                    new OpenAIClientOptions { Endpoint = new Uri("http://localhost:11434/v1") }
-                );
 
-                // 2. Select your local model name (e.g., "llama3.2")
-                ChatClient chatClient = client.GetChatClient("llama3.2");
+                // If the API key is set to a placeholder, use the local Ollama endpoint instead
+                if (apiKey?.Equals("YOUR_AZURE_OPENAI_API_KEY", StringComparison.CurrentCultureIgnoreCase) == true)
+                {
+                    // 1. Initialize the client targeting your local Ollama endpoint
+                    var client = new OpenAIClient(
+                        new ApiKeyCredential("ollama"),
+                        new OpenAIClientOptions { Endpoint = new Uri("http://localhost:11434/v1") }
+                    );
 
-                // 3. Pass your query string
-                // string userQuery = "Explain the offside rule in football in one sentence.";
-                var systemPrompt = "You are an elite Premier League tactical commentator. Analyze synthetic JSON event logs and write brief, engaging match commentary. Highlight player positioning, dynamic momentum, and key chances.";
-                var userPrompt = $"Analyze the following synthetic match event stream and provide live tactical commentary:\n{JsonSerializer.Serialize(events)}. Query is ";
-                ChatCompletion completion = chatClient.CompleteChat(systemPrompt+ userPrompt + query);
+                    // 2. Select your local model name (e.g., "llama3.2")
+                    ChatClient chatClient = client.GetChatClient("llama3.2");
 
-                // 4. Extract and print the response string
-                string responseString = completion.Content[0].Text;
-                Console.WriteLine(responseString);
+                    // 3. Pass your query string
+                    var systemPrompt = "You are an elite Premier League tactical commentator. Analyze synthetic JSON event logs and write brief, engaging match commentary. Highlight player positioning, dynamic momentum, and key chances.";
+                    var userPrompt = $"Analyze the following synthetic match event stream and provide live tactical commentary:\n{JsonSerializer.Serialize(events)}. Query is ";
+                    ChatCompletion completion = chatClient.CompleteChat(systemPrompt + userPrompt + query);
 
-                return responseString;
+                    // 4. Extract and print the response string
+                    string responseString = completion.Content[0].Text;
+
+                    return responseString;
+                }
 
                 if (!string.IsNullOrWhiteSpace(endpoint))
                 {
                     // Build a JSON snapshot of events to send to the model
                     var matchJson = JsonSerializer.Serialize(events);
-                    //var systemPrompt = "You are an elite Premier League tactical commentator. Analyze synthetic JSON event logs and write brief, engaging match commentary. Highlight player positioning, dynamic momentum, and key chances.";
-                    //var userPrompt = $"Analyze the following synthetic match event stream and provide live tactical commentary:\n{matchJson}";
+                    var systemPrompt = "You are an elite Premier League tactical commentator. Analyze synthetic JSON event logs and write brief, engaging match commentary. Highlight player positioning, dynamic momentum, and key chances.";
+                    var userPrompt = $"Analyze the following synthetic match event stream and provide live tactical commentary:\n{matchJson}";
 
                     var payload = new
                     {

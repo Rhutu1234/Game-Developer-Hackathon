@@ -19,9 +19,4 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.8.0" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- Reference frontend UI project so the solution binds projects and allows publish to include static assets -->
-    <ProjectReference Include="..\UI\UI.csproj" />
-  </ItemGroup>
-
 </Project>
