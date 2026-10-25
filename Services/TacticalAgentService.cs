@@ -18,10 +18,12 @@ namespace Game_Developer_Hackathon.Services
     public class TacticalAgentService : ITacticalAgentService
     {
         private readonly IConfiguration _config;
+        private readonly ILogger<TacticalAgentService> _logger;
 
-        public TacticalAgentService(IConfiguration config)
+        public TacticalAgentService(IConfiguration config, ILogger<TacticalAgentService> logger)
         {
             _config = config;
+            _logger = logger;
         }
 
         public async Task<TacticalAnalysisReport> AnalyzeMatchStreamAsync(string homeTeam, string awayTeam, List<MatchEvent> events)
@@ -55,59 +57,32 @@ namespace Game_Developer_Hackathon.Services
 
         public async Task<string> ProcessAgentChatQueryAsync(string query, List<MatchEvent> events)
         {
-            // Try Azure OpenAI REST API if configured, otherwise fall back to local analysis
-            try
+            var azureSection = _config.GetSection("AzureOpenAI");
+            var endpoint = azureSection["Endpoint"]?.TrimEnd('/');
+            var apiKey = azureSection["ApiKey"];
+            var deployment = azureSection["DeploymentName"] ?? azureSection["Deployment"] ?? "gpt-4o";
+            var useAzure = !string.IsNullOrWhiteSpace(endpoint)
+                && !string.IsNullOrWhiteSpace(apiKey)
+                && !apiKey.Equals("YOUR_AZURE_OPENAI_API_KEY", StringComparison.OrdinalIgnoreCase);
+
+            var matchJson = JsonSerializer.Serialize(events);
+            var systemPrompt = "You are an elite Premier League tactical commentator. Analyze synthetic JSON event logs and write brief, engaging match commentary. Highlight player positioning, dynamic momentum, and key chances.";
+            var userPrompt = $"Analyze the following synthetic match event stream and provide live tactical commentary:\n{matchJson}";
+
+            if (useAzure)
             {
-                var azureSection = _config.GetSection("AzureOpenAI");
-                var endpoint = azureSection["Endpoint"]?.TrimEnd('/');
-                var apiKey = azureSection["ApiKey"];
-                var deployment = azureSection["DeploymentName"] ?? azureSection["Deployment"] ?? "gpt-4o";
-
-
-                // If the API key is set to a placeholder, use the local Ollama endpoint instead
-                if (apiKey?.Equals("YOUR_AZURE_OPENAI_API_KEY", StringComparison.CurrentCultureIgnoreCase) == true)
+                try
                 {
-                    // 1. Initialize the client targeting your local Ollama endpoint
-                    var client = new OpenAIClient(
-                        new ApiKeyCredential("ollama"),
-                        new OpenAIClientOptions { Endpoint = new Uri("http://localhost:11434/v1") }
-                    );
-
-                    // 2. Select your local model name (e.g., "llama3.2")
-                    ChatClient chatClient = client.GetChatClient("llama3.2");
-
-                    // 3. Pass your query string
-                    var systemPrompt = "You are an elite Premier League tactical commentator. Analyze synthetic JSON event logs and write brief, engaging match commentary. Highlight player positioning, dynamic momentum, and key chances.";
-                    var userPrompt = $"Analyze the following synthetic match event stream and provide live tactical commentary:\n{JsonSerializer.Serialize(events)}. Query is ";
-                    ChatCompletion completion = chatClient.CompleteChat(systemPrompt + userPrompt + query);
-
-                    // 4. Extract and print the response string
-                    string responseString = completion.Content[0].Text;
-
-                    return responseString;
-                }
-
-                if (!string.IsNullOrWhiteSpace(endpoint))
-                {
-                    // Build a JSON snapshot of events to send to the model
-                    var matchJson = JsonSerializer.Serialize(events);
-                    var systemPrompt = "You are an elite Premier League tactical commentator. Analyze synthetic JSON event logs and write brief, engaging match commentary. Highlight player positioning, dynamic momentum, and key chances.";
-                    var userPrompt = $"Analyze the following synthetic match event stream and provide live tactical commentary:\n{matchJson}";
-
                     var payload = new
                     {
                         messages = new[] {
                             new { role = "system", content = systemPrompt },
-                            new { role = "user", content = userPrompt }
+                            new { role = "user", content = $"{userPrompt}\nQuery: {query}" }
                         }
                     };
 
                     using var http = new HttpClient();
-                    if (!string.IsNullOrWhiteSpace(apiKey))
-                    {
-                        // Azure OpenAI expects the api-key header
-                        http.DefaultRequestHeaders.Add("api-key", apiKey);
-                    }
+                    http.DefaultRequestHeaders.Add("api-key", apiKey);
 
                     var url = $"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version=2023-05-15";
                     var resp = await http.PostAsJsonAsync(url, payload);
@@ -121,28 +96,51 @@ namespace Game_Developer_Hackathon.Services
                             {
                                 var text = content.GetString();
                                 if (!string.IsNullOrWhiteSpace(text))
-                                    return text!;
+                                    return text;
                             }
 
-                            // Some responses may contain 'text' or nested structures
                             if (first.TryGetProperty("text", out var textProp))
                             {
                                 var t = textProp.GetString();
                                 if (!string.IsNullOrWhiteSpace(t))
-                                    return t!;
+                                    return t;
                             }
                         }
                     }
+
+                    _logger.LogWarning("Azure OpenAI did not return a usable response (HTTP {StatusCode}); trying Ollama.", resp.StatusCode);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Azure OpenAI request failed; trying Ollama.");
                 }
             }
-            catch (Exception)
+
+            try
             {
-                // If agent call fails, fall back to local engine. Avoid throwing to keep UI resilient.
-                // TODO: log exception using ILogger if available.
+                var ollamaSection = _config.GetSection("Ollama");
+                var ollamaEndpoint = ollamaSection["Endpoint"]?.TrimEnd('/');
+                var ollamaModel = ollamaSection["Model"];
+                if (!string.IsNullOrWhiteSpace(ollamaEndpoint) && !string.IsNullOrWhiteSpace(ollamaModel))
+                {
+                    var client = new OpenAIClient(
+                        new ApiKeyCredential("ollama"),
+                        new OpenAIClientOptions { Endpoint = new Uri($"{ollamaEndpoint}/v1") }
+                    );
+                    ChatClient chatClient = client.GetChatClient(ollamaModel);
+                    ChatCompletion completion = chatClient.CompleteChat(
+                        $"{systemPrompt}\n{userPrompt}\nQuery: {query}"
+                    );
+                    if (completion.Content.Count > 0 && !string.IsNullOrWhiteSpace(completion.Content[0].Text))
+                        return completion.Content[0].Text;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Ollama request failed; using local analysis fallback.");
             }
 
-            // Fallback local analysis when agent not configured or call fails
-            await Task.Delay(300); // Simulate network latency
+            await Task.Delay(300);
             return $"AI Agent Analysis: Regarding '{query}', the event stream shows {events.Count} recorded telemetry actions. Spatial dominance was predominantly maintained in the upper pitch quadrant.";
         }
     }
