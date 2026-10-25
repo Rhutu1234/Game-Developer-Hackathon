@@ -1,5 +1,6 @@
 Game-Developer-Hackathon — Quick Start
-![Uploading Gemini_Generated_Image_x352x5x352x5x352.png…]()
+
+<img width="1376" height="768" alt="Gemini_Generated_Image_x352x5x352x5x352" src="https://github.com/user-attachments/assets/7946b897-0fdc-4c83-ab77-0d9bbcf27fea" />
 
 Overview
 
