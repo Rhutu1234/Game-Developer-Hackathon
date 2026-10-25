@@ -4,7 +4,7 @@ Overview
 
 This repository is a full-stack sample: a .NET backend (Game-Developer-Hackathon) and an Angular frontend (UI).
 - Backend: C# .NET 10 Web API (serves API and can host built frontend assets)
-- Frontend: Angular (standalone AppComponent) in UI/
+- Frontend: Angular (standalone AppComponent) in [(https://github.com/Rhutu1234/Game-Developer-Hackathon-UI)]
 
 Final development URLs
 - Backend API (when running): https://localhost:51979
